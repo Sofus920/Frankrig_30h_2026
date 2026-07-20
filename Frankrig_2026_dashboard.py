@@ -181,29 +181,45 @@ if not sallies_kun.empty:
             columns=['Holdnavn_Fane', 'Kører']), width='stretch')
 
     with col_chart:
-        # NYT: Knapper til at skifte grafens indhold
+        # --- KONTROLPANEL TIL GRAFEN ---
         valgt_reference = st.radio(
             "Sammenlign med:", ["Vinderhold", "Feltet (Gennemsnit)"], horizontal=True)
+        valgt_metrik = st.radio(
+            "Visning:", ["Total tid (per stint)", "Gennemsnit (per omgang)"], horizontal=True)
 
+        # Logik til at vælge den rigtige kolonne i tabellen baseret på valgene
         if valgt_reference == "Vinderhold":
-            plot_kolonne = 'Total_Tid_Tabt_Vinder (Sek)'
             titel_suffix = 'Vinder'
+            if "Total" in valgt_metrik:
+                plot_kolonne = 'Total_Tid_Tabt_Vinder (Sek)'
+                y_label = 'Total sekunder'
+            else:
+                plot_kolonne = 'Tid_Tabt_vs_Vinder'
+                y_label = 'Sekunder per omgang'
         else:
-            plot_kolonne = 'Total_Tid_Tabt_Feltet (Sek)'
             titel_suffix = 'Feltet'
+            if "Total" in valgt_metrik:
+                plot_kolonne = 'Total_Tid_Tabt_Feltet (Sek)'
+                y_label = 'Total sekunder'
+            else:
+                plot_kolonne = 'Tid_Tabt_vs_Feltet'
+                y_label = 'Sekunder per omgang'
 
+        # Generer grafen dynamisk
         fig_kører, ax_kører = plt.subplots(figsize=(6, 4))
+
+        # Farv søjlerne (Rød for tabt tid, Grøn for vundet tid)
         farver = ['#e74c3c' if x >
                   0 else '#2ecc71' for x in kører_data[plot_kolonne]]
+
         ax_kører.bar(kører_data['Stint_Navn'],
                      kører_data[plot_kolonne], color=farver)
         ax_kører.axhline(0, color='black', linewidth=1.5)
         ax_kører.set_title(
-            f'Samlet Tid Tabt/Vundet vs. {titel_suffix}', fontweight='bold')
-        ax_kører.set_ylabel('Total sekunder')
+            f'Tid Tabt/Vundet vs. {titel_suffix}', fontweight='bold')
+        ax_kører.set_ylabel(y_label)
         plt.xticks(rotation=45)
         st.pyplot(fig_kører)
-
     st.markdown("---")
 
 # --- GRAFIK ---
