@@ -46,7 +46,7 @@ for ark_navn, df_ark in alle_ark.items():
     er_sallies = 'sallie' in ark_navn.lower()
 
     for kol in kolonner:
-        # Ignorer metadata kolonner
+        # Ignorer metadata kolonner i venstre side (Rækketællere osv.)
         kol_navn_ren = str(kol).strip().lower()
         if kol_navn_ren == 'stint' or kol_navn_ren == 'stint:' or kol_navn_ren.startswith('omga'):
             continue
@@ -57,7 +57,7 @@ for ark_navn, df_ark in alle_ark.items():
             if pd.notna(forste_tid) and forste_tid > 150:
                 hold_pit_tider.append(forste_tid)
 
-        # Track Pace analyse
+        # Track Pace analyse (alle tiderne)
         stint_data = pd.to_numeric(
             df_ark[kol], errors='coerce').dropna().tolist()
         if len(stint_data) > 0:
@@ -65,6 +65,7 @@ for ark_navn, df_ark in alle_ark.items():
             stint_navne.extend([kol] * len(stint_data))
 
             if er_sallies:
+                # Klipper første ord af overskriften (f.eks. "Madsen" fra "Madsen 1")
                 kører = str(kol).split(' ')[0].strip()
             else:
                 kører = ark_navn
@@ -98,7 +99,7 @@ samlet_df = pd.concat(samlet_data, ignore_index=True)
 pit_df = pd.DataFrame(pit_data_liste).sort_values(
     by='Gns Pit Tid (Sek)').reset_index(drop=True)
 
-# Udregn Pace og Delta
+# Udregn Pace og Delta i 15-minutters intervaller
 interval = 0.25
 samlet_df['Tids_Interval'] = (samlet_df['Timer_Kørt'] // interval) * interval
 rene_omgange = samlet_df[samlet_df['Omgangstid'] < 100].copy()
@@ -124,11 +125,12 @@ col1, col2 = st.columns(2)
 with col1:
     st.subheader("⏱️ Pitstop Analyse")
     st.markdown("Gennemsnitlig tid for Omgang 1. Løbsstart er sorteret fra.")
-    st.dataframe(pit_df, width='stretch')
+    st.dataframe(pit_df)
 
 sallies_kun = rene_omgange[rene_omgange['Hold_Kategori'] == 'Sallies']
 
 if not sallies_kun.empty:
+    # Kører Opsummering
     driver_summary = sallies_kun.groupby(['Holdnavn_Fane', 'Kører']).agg(
         Gns_Omgangstid=('Omgangstid', 'mean'),
         Tid_Tabt_vs_Vinder=('Delta_vs_Vinder', 'mean'),
@@ -143,6 +145,7 @@ if not sallies_kun.empty:
     driver_summary = driver_summary.sort_values(
         by=['Holdnavn_Fane', 'Total_Tid_Tabt_Vinder (Sek)'])
 
+    # Stint Opsummering
     stint_summary = sallies_kun.groupby(['Holdnavn_Fane', 'Kører', 'Stint_Navn']).agg(
         Gns_Omgangstid=('Omgangstid', 'mean'),
         Tid_Tabt_vs_Vinder=('Delta_vs_Vinder', 'mean'),
@@ -154,14 +157,19 @@ if not sallies_kun.empty:
         stint_summary['Omgange']
     stint_summary['Total_Tid_Tabt_Feltet (Sek)'] = stint_summary['Tid_Tabt_vs_Feltet'] * \
         stint_summary['Omgange']
+
+    # Naturlig kronologisk sortering (1, 2, 3... i stedet for 1, 10, 11, 2)
+    stint_summary['Stint_Nr'] = stint_summary['Stint_Navn'].str.extract(
+        r'(\d+)').astype(float).fillna(0)
     stint_summary = stint_summary.sort_values(
-        by=['Holdnavn_Fane', 'Stint_Navn'])
+        by=['Holdnavn_Fane', 'Kører', 'Stint_Nr'])
+    stint_summary = stint_summary.drop(columns=['Stint_Nr'])
 
     with col2:
         st.subheader("🏎️ Kører Opsummering")
         st.markdown(
             "*Positivt tal = Langsommere (tabt tid). Negativt tal = Hurtigere (vundet tid).*")
-        st.dataframe(driver_summary, width='stretch')
+        st.dataframe(driver_summary)
 
     st.markdown("---")
 
@@ -177,17 +185,16 @@ if not sallies_kun.empty:
     col_table, col_chart = st.columns([1.5, 1])
 
     with col_table:
-        st.dataframe(kører_data.drop(
-            columns=['Holdnavn_Fane', 'Kører']), width='stretch')
+        st.dataframe(kører_data.drop(columns=['Holdnavn_Fane', 'Kører']))
 
     with col_chart:
-        # --- KONTROLPANEL TIL GRAFEN ---
+        # Kontrolpanel til grafen
         valgt_reference = st.radio(
             "Sammenlign med:", ["Vinderhold", "Feltet (Gennemsnit)"], horizontal=True)
         valgt_metrik = st.radio(
             "Visning:", ["Total tid (per stint)", "Gennemsnit (per omgang)"], horizontal=True)
 
-        # Logik til at vælge den rigtige kolonne i tabellen baseret på valgene
+        # Logik til at vælge data og aksetitler
         if valgt_reference == "Vinderhold":
             titel_suffix = 'Vinder'
             if "Total" in valgt_metrik:
@@ -220,6 +227,7 @@ if not sallies_kun.empty:
         ax_kører.set_ylabel(y_label)
         plt.xticks(rotation=45)
         st.pyplot(fig_kører)
+
     st.markdown("---")
 
 # --- GRAFIK ---
