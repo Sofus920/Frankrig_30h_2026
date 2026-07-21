@@ -204,13 +204,11 @@ if not sallies_kun.empty:
 
     # --- 🏆 KØRER LEADERBOARD ---
     st.subheader("🏆 Kører Leaderboard (Ratings)")
-
-    # --- NYT: Forklaringstekst ---
     st.markdown("""
     Klik på kolonneoverskrifterne for at sortere og finde løbets sande konge. *Opgjort som matematisk vægtet gennemsnit af stints.*
     
     **Sådan udregnes ratings (0-100):**
-    * **🏁 Speed:** 80 point for at matche vinderholdets gennemsnitstid. Du vinder/taber 5 point for hver 0,1 sekund, du er hurtigere eller langsommere.
+    * **🏁 Speed:** 90 point for at matche vinderholdets gennemsnitstid. Du vinder/taber 2 point for hver 0,1 sekund, du er hurtigere eller langsommere.
     * **⏱️ Consistency:** 100 point for en fejlfrit lav standardafvigelse på 0,05 sek. Du taber 15 point for hver 0,1 sekunds ekstra udsving.
     * **🌟 Overall:** Simpelt gennemsnit af Speed og Consistency.
     """)
@@ -233,9 +231,9 @@ if not sallies_kun.empty:
 
     rating_df = pd.DataFrame(rating_data)
 
-    # --- STRAMMERE SPEED RATING: Baseline 80 point, multiplier ændret til 50 point pr sekund (5 pr tiendedel) ---
+    # --- MILDERE SPEED RATING: Baseline 90 point, multiplier ændret til 20 point pr sekund (2 point pr tiendedel) ---
     rating_df['Speed Rating'] = (
-        80 - (rating_df['Gns_Delta'] * 50)).clip(lower=0, upper=100).astype(int)
+        90 - (rating_df['Gns_Delta'] * 20)).clip(lower=0, upper=100).astype(int)
     rating_df['Consistency Rating'] = (
         100 - ((rating_df['Gns_Std'] - 0.05) * 150)).clip(lower=0, upper=100).astype(int)
     rating_df['Overall Rating'] = (
