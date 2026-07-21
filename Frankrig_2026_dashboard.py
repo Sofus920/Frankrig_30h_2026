@@ -161,15 +161,17 @@ if not sallies_kun.empty:
         df_til_beregning = sallies_kun[(sallies_kun['Omgangstid'] >= lower) & (
             sallies_kun['Omgangstid'] <= upper)]
 
-        std_base = 0.05
-        std_mult = 150
-        cons_tekst = "* **⏱️ Consistency (Renset):** 100 point for en fejlfrit lav standardafvigelse på 0,05 sek. Du taber 15 point for hver 0,1 sekunds ekstra udsving."
+        # BALANCERET RATING FOR RENSET DATA
+        std_base = 0.1
+        std_mult = 100
+        cons_tekst = "* **⏱️ Consistency (Renset):** 100 point for en standardafvigelse på 0,1 sek. Du taber 10 point for hver 0,1 sekunds ekstra udsving."
     else:
         df_til_beregning = sallies_kun
 
-        std_base = 0.5
-        std_mult = 10
-        cons_tekst = "* **⏱️ Consistency (Ufiltreret):** 100 point for en standardafvigelse på 0,5 sek. Du taber 1 point for hver 0,1 sekunds ekstra udsving."
+        # BALANCERET RATING FOR UFILTRERET DATA
+        std_base = 0.4
+        std_mult = 50
+        cons_tekst = "* **⏱️ Consistency (Ufiltreret):** 100 point for en standardafvigelse på 0,4 sek. Du taber 5 point for hver 0,1 sekunds ekstra udsving."
 
     driver_summary = df_til_beregning.groupby(['Holdnavn_Fane', 'Kører']).agg(
         Gns_Omgangstid=('Omgangstid', 'mean'),
@@ -249,7 +251,7 @@ if not sallies_kun.empty:
     display_leaderboard = rating_df[[
         'Holdnavn_Fane', 'Kører', 'Overall Rating', 'Speed Rating', 'Consistency Rating', 'Totale_Omgange']]
     display_leaderboard = display_leaderboard.sort_values(by='Overall Rating', ascending=False).rename(
-        columns={'Holdnavn_Fane': 'Hold', 'Totale_Omgange': 'Omgange (Renset)'})
+        columns={'Holdnavn_Fane': 'Hold', 'Totale_Omgange': 'Omgange'})
 
     st.dataframe(display_leaderboard, hide_index=True,
                  use_container_width=True)
@@ -268,7 +270,7 @@ if not sallies_kun.empty:
     overall_rating = kører_stats['Overall Rating']
     speed_rating = kører_stats['Speed Rating']
     cons_rating = kører_stats['Consistency Rating']
-    totale_omgange = kører_stats['Omgange (Renset)']
+    totale_omgange = kører_stats['Omgange']
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("🌟 Overall Rating", f"{overall_rating}")
@@ -394,8 +396,6 @@ sallies_ark = pace_udvikling[pace_udvikling['Hold_Kategori']
                              == 'Sallies']['Holdnavn_Fane'].unique()
 farver = ['#3498db', '#9b59b6']
 for i, ark_navn in enumerate(sallies_ark):
-    # FEJLEN LÅ HER: Den tjekkede 'Hold_Kategori' == ark_navn (f.eks. "Sallies" == "Sallie's"). Det gav en tom liste.
-    # Nu tjekker vi den korrekte 'Holdnavn_Fane' kolonne!
     sallies_data = pace_udvikling[pace_udvikling['Holdnavn_Fane'] == ark_navn]
     if not sallies_data.empty:
         ax.plot(sallies_data['Tids_Interval'], sallies_data['Omgangstid'], color=farver[i % len(
