@@ -13,13 +13,17 @@ st.set_page_config(page_title="Karting Analyse 2026", layout="wide")
 st.title("🏁 Gokart Analyse: Frankrig 2026")
 st.markdown("Interaktiv analyse af track pace, pit-tider og konsistens.")
 
-# --- HJÆLPEFUNKTION TIL AT CENTRERE TABELLER ---
-
-
-def center_tabel(df):
-    return df.style.set_properties(**{'text-align': 'center'}) \
-                   .set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
-
+# --- CSS: TVING ALLE TABELLER OG OVERSKRIFTER TIL AT STÅ CENTRERET ---
+st.markdown("""
+<style>
+    table, th, td {
+        text-align: center !important;
+    }
+    div[data-testid="stDataFrame"] th {
+        text-align: center !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # --- INDLÆS DATA ---
 script_mappe = os.path.dirname(os.path.abspath(__file__))
@@ -137,7 +141,7 @@ col1, col2 = st.columns(2)
 with col1:
     st.subheader("⏱️ Pitstop Analyse")
     st.markdown("Gennemsnitlig tid for Omgang 1. Løbsstart er sorteret fra.")
-    st.dataframe(center_tabel(pit_df), hide_index=True)
+    st.dataframe(pit_df, hide_index=True, use_container_width=True)
 
 sallies_kun = rene_omgange[rene_omgange['Hold_Kategori'] == 'Sallies']
 
@@ -194,22 +198,44 @@ if not sallies_kun.empty:
     visnings_stint = stint_summary.drop(columns=['Stint_Kronologi'])
 
     with col2:
-        st.dataframe(center_tabel(driver_summary), hide_index=True)
+        st.dataframe(driver_summary, hide_index=True, use_container_width=True)
 
     st.markdown("---")
 
     # --- 🏆 KØRER LEADERBOARD ---
     st.subheader("🏆 Kører Leaderboard (Ratings)")
-    st.markdown("Klik på kolonneoverskrifterne for at sortere og finde løbets sande konge. *Overall Rating er gennemsnittet af Speed og Consistency.*")
 
-    rating_df = stint_summary.groupby(['Holdnavn_Fane', 'Kører']).agg(
-        Gns_Delta=('Tid_Tabt_vs_Vinder', 'mean'),
-        Gns_Std=('Std_Afvigelse', 'mean'),
-        Totale_Omgange=('Omgange', 'sum')
-    ).reset_index()
+    # --- NYT: Forklaringstekst ---
+    st.markdown("""
+    Klik på kolonneoverskrifterne for at sortere og finde løbets sande konge. *Opgjort som matematisk vægtet gennemsnit af stints.*
+    
+    **Sådan udregnes ratings (0-100):**
+    * **🏁 Speed:** 80 point for at matche vinderholdets gennemsnitstid. Du vinder/taber 5 point for hver 0,1 sekund, du er hurtigere eller langsommere.
+    * **⏱️ Consistency:** 100 point for en fejlfrit lav standardafvigelse på 0,05 sek. Du taber 15 point for hver 0,1 sekunds ekstra udsving.
+    * **🌟 Overall:** Simpelt gennemsnit af Speed og Consistency.
+    """)
 
+    rating_data = []
+    for (hold, k), group in stint_summary.groupby(['Holdnavn_Fane', 'Kører']):
+        totale_omgange = group['Omgange'].sum()
+        if totale_omgange > 0:
+            vaegtet_delta = (group['Tid_Tabt_vs_Vinder']
+                             * group['Omgange']).sum() / totale_omgange
+            vaegtet_std = (group['Std_Afvigelse'] *
+                           group['Omgange']).sum() / totale_omgange
+            rating_data.append({
+                'Holdnavn_Fane': hold,
+                'Kører': k,
+                'Gns_Delta': vaegtet_delta,
+                'Gns_Std': vaegtet_std,
+                'Totale_Omgange': totale_omgange
+            })
+
+    rating_df = pd.DataFrame(rating_data)
+
+    # --- STRAMMERE SPEED RATING: Baseline 80 point, multiplier ændret til 50 point pr sekund (5 pr tiendedel) ---
     rating_df['Speed Rating'] = (
-        90 - (rating_df['Gns_Delta'] * 40)).clip(lower=0, upper=100).astype(int)
+        80 - (rating_df['Gns_Delta'] * 50)).clip(lower=0, upper=100).astype(int)
     rating_df['Consistency Rating'] = (
         100 - ((rating_df['Gns_Std'] - 0.05) * 150)).clip(lower=0, upper=100).astype(int)
     rating_df['Overall Rating'] = (
@@ -220,8 +246,8 @@ if not sallies_kun.empty:
     display_leaderboard = display_leaderboard.sort_values(by='Overall Rating', ascending=False).rename(
         columns={'Holdnavn_Fane': 'Hold', 'Totale_Omgange': 'Omgange (Renset)'})
 
-    st.dataframe(center_tabel(display_leaderboard),
-                 hide_index=True, use_container_width=True)
+    st.dataframe(display_leaderboard, hide_index=True,
+                 use_container_width=True)
 
     st.markdown("---")
 
@@ -232,26 +258,26 @@ if not sallies_kun.empty:
     valgt_kører = st.selectbox("Vælg Kører:", unikke_kørere)
     kører_data = visnings_stint[visnings_stint['Kører'] == valgt_kører]
 
-    gns_delta = kører_data['Tid_Tabt_vs_Vinder'].mean()
-    speed_rating = int(max(0, min(100, 90 - (gns_delta * 40))))
-
-    gns_std = kører_data['Std_Afvigelse'].mean()
-    cons_rating = int(max(0, min(100, 100 - ((gns_std - 0.05) * 150))))
-    overall_rating = int((speed_rating + cons_rating) / 2)
+    kører_stats = display_leaderboard[display_leaderboard['Kører']
+                                      == valgt_kører].iloc[0]
+    overall_rating = kører_stats['Overall Rating']
+    speed_rating = kører_stats['Speed Rating']
+    cons_rating = kører_stats['Consistency Rating']
+    totale_omgange = kører_stats['Omgange (Renset)']
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("🌟 Overall Rating", f"{overall_rating}")
     m2.metric("🏁 Speed Rating", f"{speed_rating}")
     m3.metric("⏱️ Consistency Rating", f"{cons_rating}")
-    m4.metric("🔁 Totale omgange", f"{int(kører_data['Omgange'].sum())}")
+    m4.metric("🔁 Totale omgange", f"{totale_omgange}")
 
     st.write("")
 
     col_table, col_chart = st.columns([1.5, 1])
 
     with col_table:
-        st.dataframe(center_tabel(kører_data.drop(
-            columns=['Holdnavn_Fane', 'Kører'])), hide_index=True)
+        tab_data = kører_data.drop(columns=['Holdnavn_Fane', 'Kører'])
+        st.dataframe(tab_data, hide_index=True, use_container_width=True)
 
     with col_chart:
         valgt_reference = st.radio(
@@ -329,12 +355,10 @@ if not sallies_kun.empty:
             color = '#e74c3c' if val > 0 else '#2ecc71'
             return f'color: {color}; font-weight: bold;'
 
-        # Tilføjer centrering OG farvekoderne oveni hinanden
-        styled_comp = display_comp.style.map(farv_difference, subset=["Difference (Sallie's vs OB)"]) \
-                                        .set_properties(**{'text-align': 'center'}) \
-                                        .set_table_styles([{'selector': 'th', 'props': [('text-align', 'center')]}])
+        styled_comp = display_comp.style.map(
+            farv_difference, subset=["Difference (Sallie's vs OB)"])
 
-        st.dataframe(styled_comp, hide_index=True)
+        st.dataframe(styled_comp, hide_index=True, use_container_width=True)
     else:
         st.write(
             "Kunne ikke finde nok data til begge hold for at lave sammenligningen.")
@@ -365,7 +389,7 @@ sallies_ark = pace_udvikling[pace_udvikling['Hold_Kategori']
                              == 'Sallies']['Holdnavn_Fane'].unique()
 farver = ['#3498db', '#9b59b6']
 for i, ark_navn in enumerate(sallies_ark):
-    sallies_data = pace_udvikling[pace_udvikling['Holdnavn_Fane'] == ark_navn]
+    sallies_data = pace_udvikling[pace_udvikling['Hold_Kategori'] == ark_navn]
     if not sallies_data.empty:
         ax.plot(sallies_data['Tids_Interval'], sallies_data['Omgangstid'], color=farver[i % len(
             farver)], linewidth=3, label=ark_navn, marker='o', markersize=4)
