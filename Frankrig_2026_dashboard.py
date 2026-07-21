@@ -160,8 +160,16 @@ if not sallies_kun.empty:
             'Omgangstid'].transform(lambda x: x.quantile(0.95))
         df_til_beregning = sallies_kun[(sallies_kun['Omgangstid'] >= lower) & (
             sallies_kun['Omgangstid'] <= upper)]
+
+        std_base = 0.05
+        std_mult = 150
+        cons_tekst = "* **⏱️ Consistency (Renset):** 100 point for en fejlfrit lav standardafvigelse på 0,05 sek. Du taber 15 point for hver 0,1 sekunds ekstra udsving."
     else:
         df_til_beregning = sallies_kun
+
+        std_base = 0.5
+        std_mult = 10
+        cons_tekst = "* **⏱️ Consistency (Ufiltreret):** 100 point for en standardafvigelse på 0,5 sek. Du taber 1 point for hver 0,1 sekunds ekstra udsving."
 
     driver_summary = df_til_beregning.groupby(['Holdnavn_Fane', 'Kører']).agg(
         Gns_Omgangstid=('Omgangstid', 'mean'),
@@ -204,12 +212,12 @@ if not sallies_kun.empty:
 
     # --- 🏆 KØRER LEADERBOARD ---
     st.subheader("🏆 Kører Leaderboard (Ratings)")
-    st.markdown("""
+    st.markdown(f"""
     Klik på kolonneoverskrifterne for at sortere og finde løbets sande konge. *Opgjort som matematisk vægtet gennemsnit af stints.*
     
     **Sådan udregnes ratings (0-100):**
     * **🏁 Speed:** 90 point for at matche vinderholdets gennemsnitstid. Du vinder/taber 2 point for hver 0,1 sekund, du er hurtigere eller langsommere.
-    * **⏱️ Consistency:** 100 point for en fejlfrit lav standardafvigelse på 0,05 sek. Du taber 15 point for hver 0,1 sekunds ekstra udsving.
+    {cons_tekst}
     * **🌟 Overall:** Simpelt gennemsnit af Speed og Consistency.
     """)
 
@@ -231,11 +239,10 @@ if not sallies_kun.empty:
 
     rating_df = pd.DataFrame(rating_data)
 
-    # --- MILDERE SPEED RATING: Baseline 90 point, multiplier ændret til 20 point pr sekund (2 point pr tiendedel) ---
     rating_df['Speed Rating'] = (
         90 - (rating_df['Gns_Delta'] * 20)).clip(lower=0, upper=100).astype(int)
     rating_df['Consistency Rating'] = (
-        100 - ((rating_df['Gns_Std'] - 0.05) * 150)).clip(lower=0, upper=100).astype(int)
+        100 - ((rating_df['Gns_Std'] - std_base) * std_mult)).clip(lower=0, upper=100).astype(int)
     rating_df['Overall Rating'] = (
         (rating_df['Speed Rating'] + rating_df['Consistency Rating']) / 2).astype(int)
 
@@ -387,7 +394,9 @@ sallies_ark = pace_udvikling[pace_udvikling['Hold_Kategori']
                              == 'Sallies']['Holdnavn_Fane'].unique()
 farver = ['#3498db', '#9b59b6']
 for i, ark_navn in enumerate(sallies_ark):
-    sallies_data = pace_udvikling[pace_udvikling['Hold_Kategori'] == ark_navn]
+    # FEJLEN LÅ HER: Den tjekkede 'Hold_Kategori' == ark_navn (f.eks. "Sallies" == "Sallie's"). Det gav en tom liste.
+    # Nu tjekker vi den korrekte 'Holdnavn_Fane' kolonne!
+    sallies_data = pace_udvikling[pace_udvikling['Holdnavn_Fane'] == ark_navn]
     if not sallies_data.empty:
         ax.plot(sallies_data['Tids_Interval'], sallies_data['Omgangstid'], color=farver[i % len(
             farver)], linewidth=3, label=ark_navn, marker='o', markersize=4)
