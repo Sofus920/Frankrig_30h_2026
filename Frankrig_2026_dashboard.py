@@ -13,7 +13,7 @@ st.set_page_config(page_title="Karting Analyse 2026", layout="wide")
 st.title("🏁 Gokart Analyse: Frankrig 2026")
 st.markdown("Interaktiv analyse af track pace, pit-tider og konsistens.")
 
-# --- INDLÆS DATA (Klar til Cloud og Lokalt) ---
+# --- INDLÆS DATA ---
 script_mappe = os.path.dirname(os.path.abspath(__file__))
 filnavn = 'Frankrig_2026_opdelt_per_hold.xlsx'
 fuld_sti = os.path.join(script_mappe, filnavn)
@@ -40,36 +40,41 @@ pit_data_liste = []
 # --- DATABEHANDLING ---
 for ark_navn, df_ark in alle_ark.items():
     kolonner = [k for k in df_ark.columns if 'Unnamed' not in str(k)]
-    alle_omgange, stint_navne, kører_navne = [], [], []
+
+    # --- NYT: Tidslinje lister ---
+    alle_omgange, stint_navne, kører_navne, stint_kronologi_liste = [], [], [], []
     hold_pit_tider = []
 
     er_sallies = 'sallie' in ark_navn.lower()
 
+    stint_counter = 1  # Starter vores usynlige kronologiske tæller for holdet
+
     for kol in kolonner:
-        # Ignorer metadata kolonner i venstre side (Rækketællere osv.)
         kol_navn_ren = str(kol).strip().lower()
         if kol_navn_ren == 'stint' or kol_navn_ren == 'stint:' or kol_navn_ren.startswith('omga'):
             continue
 
-        # Pit-analyse (første række)
         if len(df_ark[kol]) > 0:
             forste_tid = pd.to_numeric(df_ark[kol].iloc[0], errors='coerce')
             if pd.notna(forste_tid) and forste_tid > 150:
                 hold_pit_tider.append(forste_tid)
 
-        # Track Pace analyse (alle tiderne)
         stint_data = pd.to_numeric(
             df_ark[kol], errors='coerce').dropna().tolist()
         if len(stint_data) > 0:
             alle_omgange.extend(stint_data)
             stint_navne.extend([kol] * len(stint_data))
 
+            # Stempler stintet med sit sande løbsnummer ud fra Excel-kolonnen
+            stint_kronologi_liste.extend([stint_counter] * len(stint_data))
+
             if er_sallies:
-                # Klipper første ord af overskriften (f.eks. "Madsen" fra "Madsen 1")
                 kører = str(kol).split(' ')[0].strip()
             else:
                 kører = ark_navn
             kører_navne.extend([kører] * len(stint_data))
+
+            stint_counter += 1
 
     if hold_pit_tider:
         gns_pit = sum(hold_pit_tider) / len(hold_pit_tider)
@@ -80,8 +85,12 @@ for ark_navn, df_ark in alle_ark.items():
         })
 
     if len(alle_omgange) > 0:
-        hold_df = pd.DataFrame(
-            {'Omgangstid': alle_omgange, 'Stint_Navn': stint_navne, 'Kører': kører_navne})
+        hold_df = pd.DataFrame({
+            'Omgangstid': alle_omgange,
+            'Stint_Navn': stint_navne,
+            'Kører': kører_navne,
+            'Stint_Kronologi': stint_kronologi_liste  # Flettes ind i datasættet
+        })
         hold_df['Akkumuleret_Tid_Sek'] = hold_df['Omgangstid'].cumsum()
         hold_df['Timer_Kørt'] = hold_df['Akkumuleret_Tid_Sek'] / 3600
 
@@ -99,7 +108,7 @@ samlet_df = pd.concat(samlet_data, ignore_index=True)
 pit_df = pd.DataFrame(pit_data_liste).sort_values(
     by='Gns Pit Tid (Sek)').reset_index(drop=True)
 
-# Udregn Pace og Delta i 15-minutters intervaller
+# Udregn Pace og Delta
 interval = 0.25
 samlet_df['Tids_Interval'] = (samlet_df['Timer_Kørt'] // interval) * interval
 rene_omgange = samlet_df[samlet_df['Omgangstid'] < 100].copy()
@@ -125,18 +134,38 @@ col1, col2 = st.columns(2)
 with col1:
     st.subheader("⏱️ Pitstop Analyse")
     st.markdown("Gennemsnitlig tid for Omgang 1. Løbsstart er sorteret fra.")
-    st.dataframe(pit_df)
+    st.dataframe(pit_df, hide_index=True)
 
 sallies_kun = rene_omgange[rene_omgange['Hold_Kategori'] == 'Sallies']
 
 if not sallies_kun.empty:
-    # Kører Opsummering
-    driver_summary = sallies_kun.groupby(['Holdnavn_Fane', 'Kører']).agg(
+    with col2:
+        st.subheader("🏎️ Kører Opsummering")
+        st.markdown(
+            "*Lav 'Std_Afvigelse' = Mange omgange på samme tid (konsistent).*")
+
+        # --- OUTLIER FILTER CHECKBOX ---
+        fjern_outliers = st.checkbox("Rens data (Fjern top/bund 5 % omgange)", value=True,
+                                     help="Fjerner de 5% hurtigste og langsommeste omgange i HVERT stint, for at filtrere taktisk ventetid, trafik eller fejl fra.")
+
+    if fjern_outliers:
+        lower = sallies_kun.groupby(['Holdnavn_Fane', 'Kører', 'Stint_Navn'])[
+            'Omgangstid'].transform(lambda x: x.quantile(0.05))
+        upper = sallies_kun.groupby(['Holdnavn_Fane', 'Kører', 'Stint_Navn'])[
+            'Omgangstid'].transform(lambda x: x.quantile(0.95))
+        df_til_beregning = sallies_kun[(sallies_kun['Omgangstid'] >= lower) & (
+            sallies_kun['Omgangstid'] <= upper)]
+    else:
+        df_til_beregning = sallies_kun
+
+    driver_summary = df_til_beregning.groupby(['Holdnavn_Fane', 'Kører']).agg(
         Gns_Omgangstid=('Omgangstid', 'mean'),
+        Std_Afvigelse=('Omgangstid', 'std'),
         Tid_Tabt_vs_Vinder=('Delta_vs_Vinder', 'mean'),
         Tid_Tabt_vs_Feltet=('Delta_vs_Feltet', 'mean'),
         Omgange=('Omgangstid', 'count')
-    ).reset_index().dropna()
+    ).reset_index()
+    driver_summary['Std_Afvigelse'] = driver_summary['Std_Afvigelse'].fillna(0)
 
     driver_summary['Total_Tid_Tabt_Vinder (Sek)'] = driver_summary['Tid_Tabt_vs_Vinder'] * \
         driver_summary['Omgange']
@@ -145,56 +174,68 @@ if not sallies_kun.empty:
     driver_summary = driver_summary.sort_values(
         by=['Holdnavn_Fane', 'Total_Tid_Tabt_Vinder (Sek)'])
 
-    # Stint Opsummering
-    stint_summary = sallies_kun.groupby(['Holdnavn_Fane', 'Kører', 'Stint_Navn']).agg(
+    # Inkluderer Stint_Kronologi i vores beregning
+    stint_summary = df_til_beregning.groupby(['Holdnavn_Fane', 'Kører', 'Stint_Navn', 'Stint_Kronologi']).agg(
         Gns_Omgangstid=('Omgangstid', 'mean'),
+        Std_Afvigelse=('Omgangstid', 'std'),
         Tid_Tabt_vs_Vinder=('Delta_vs_Vinder', 'mean'),
         Tid_Tabt_vs_Feltet=('Delta_vs_Feltet', 'mean'),
         Omgange=('Omgangstid', 'count')
-    ).reset_index().dropna()
+    ).reset_index()
+    stint_summary['Std_Afvigelse'] = stint_summary['Std_Afvigelse'].fillna(0)
 
     stint_summary['Total_Tid_Tabt_Vinder (Sek)'] = stint_summary['Tid_Tabt_vs_Vinder'] * \
         stint_summary['Omgange']
     stint_summary['Total_Tid_Tabt_Feltet (Sek)'] = stint_summary['Tid_Tabt_vs_Feltet'] * \
         stint_summary['Omgange']
 
-    # Naturlig kronologisk sortering (1, 2, 3... i stedet for 1, 10, 11, 2)
-    stint_summary['Stint_Nr'] = stint_summary['Stint_Navn'].str.extract(
-        r'(\d+)').astype(float).fillna(0)
+    # --- NYT: Sorterer kun på vores sande usynlige tidslinje ---
     stint_summary = stint_summary.sort_values(
-        by=['Holdnavn_Fane', 'Kører', 'Stint_Nr'])
-    stint_summary = stint_summary.drop(columns=['Stint_Nr'])
+        by=['Holdnavn_Fane', 'Stint_Kronologi'])
+
+    # Drop den usynlige kolonne for tabellen, men bevar den originale til senere
+    visnings_stint = stint_summary.drop(columns=['Stint_Kronologi'])
 
     with col2:
-        st.subheader("🏎️ Kører Opsummering")
-        st.markdown(
-            "*Positivt tal = Langsommere (tabt tid). Negativt tal = Hurtigere (vundet tid).*")
-        st.dataframe(driver_summary)
+        st.dataframe(driver_summary, hide_index=True)
 
     st.markdown("---")
 
-    # --- KØRER DEEP-DIVE ---
-    st.subheader("👤 Kører Deep-Dive")
-    st.markdown(
-        "Vælg en specifik kører for at isolere alle vedkommendes stints.")
+    # --- KØRER DEEP-DIVE MED RATING ---
+    st.subheader("👤 Kører Deep-Dive & Ratings")
+    st.markdown("Vælg en specifik kører for at se detaljerede stints, graf og en beregnet Speed & Consistency Score (0-100). *Nu sorteret fuldstændig kronologisk.*")
 
-    unikke_kørere = sorted(sallies_kun['Kører'].unique())
+    unikke_kørere = sorted(df_til_beregning['Kører'].unique())
     valgt_kører = st.selectbox("Vælg Kører:", unikke_kørere)
-    kører_data = stint_summary[stint_summary['Kører'] == valgt_kører]
+    kører_data = visnings_stint[visnings_stint['Kører'] == valgt_kører]
+
+    # RATING LOGIK
+    gns_delta = kører_data['Tid_Tabt_vs_Vinder'].mean()
+    speed_rating = int(max(0, min(100, 90 - (gns_delta * 40))))
+
+    gns_std = kører_data['Std_Afvigelse'].mean()
+    cons_rating = int(max(0, min(100, 100 - ((gns_std - 0.05) * 150))))
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("🏁 Speed Rating (0-100)", f"{speed_rating}")
+    m2.metric("⏱️ Consistency Rating (0-100)", f"{cons_rating}")
+    m3.metric("🔁 Totale omgange (vist i beregning)",
+              f"{int(kører_data['Omgange'].sum())}")
+
+    st.write("")
 
     col_table, col_chart = st.columns([1.5, 1])
 
     with col_table:
-        st.dataframe(kører_data.drop(columns=['Holdnavn_Fane', 'Kører']))
+        st.dataframe(kører_data.drop(
+            columns=['Holdnavn_Fane', 'Kører']), hide_index=True)
 
     with col_chart:
-        # Kontrolpanel til grafen
         valgt_reference = st.radio(
             "Sammenlign med:", ["Vinderhold", "Feltet (Gennemsnit)"], horizontal=True)
         valgt_metrik = st.radio(
             "Visning:", ["Total tid (per stint)", "Gennemsnit (per omgang)"], horizontal=True)
 
-        # Logik til at vælge data og aksetitler
         if valgt_reference == "Vinderhold":
             titel_suffix = 'Vinder'
             if "Total" in valgt_metrik:
@@ -212,13 +253,11 @@ if not sallies_kun.empty:
                 plot_kolonne = 'Tid_Tabt_vs_Feltet'
                 y_label = 'Sekunder per omgang'
 
-        # Generer grafen dynamisk
         fig_kører, ax_kører = plt.subplots(figsize=(6, 4))
-
-        # Farv søjlerne (Rød for tabt tid, Grøn for vundet tid)
         farver = ['#e74c3c' if x >
                   0 else '#2ecc71' for x in kører_data[plot_kolonne]]
 
+        # Plot bruger nu Stint_Navn som x-akse, men er garanteret i kronologisk rækkefølge
         ax_kører.bar(kører_data['Stint_Navn'],
                      kører_data[plot_kolonne], color=farver)
         ax_kører.axhline(0, color='black', linewidth=1.5)
@@ -227,6 +266,55 @@ if not sallies_kun.empty:
         ax_kører.set_ylabel(y_label)
         plt.xticks(rotation=45)
         st.pyplot(fig_kører)
+
+    st.markdown("---")
+
+    # --- NYT: DEN INTERNE DUEL (SALLIE'S VS OLD BOYS) ---
+    st.subheader("⚔️ Den Interne Duel: Sallie's vs Old Boys")
+    st.markdown("Sammenligning af gennemsnitstider per stint. *Negativ difference (Grøn) = Sallie's var hurtigst. Positiv (Rød) = Old Boys var hurtigst.*")
+
+    sallies_team1 = stint_summary[stint_summary['Holdnavn_Fane'] == "Sallie's"]
+    sallies_team2 = stint_summary[stint_summary['Holdnavn_Fane']
+                                  == "Sallie's Old Boys"]
+
+    if not sallies_team1.empty and not sallies_team2.empty:
+        # Nu fletter vi KUN på vores bundsolide Stint_Kronologi
+        st1_agg = sallies_team1.groupby(['Stint_Kronologi', 'Stint_Navn', 'Kører']).agg(
+            Tid1=('Gns_Omgangstid', 'mean')).reset_index()
+        st2_agg = sallies_team2.groupby(['Stint_Kronologi', 'Stint_Navn', 'Kører']).agg(
+            Tid2=('Gns_Omgangstid', 'mean')).reset_index()
+
+        comp_df = pd.merge(st1_agg, st2_agg, on=[
+                           'Stint_Kronologi'], how='outer', suffixes=('_S', '_OB'))
+        comp_df = comp_df.sort_values('Stint_Kronologi')
+
+        display_comp = pd.DataFrame({
+            'Løbs Stint Nr.': comp_df['Stint_Kronologi'],
+            "Sallie's Kører": comp_df['Kører_S'].fillna("Ingen data") + " (" + comp_df['Stint_Navn_S'].fillna("") + ")",
+            "Sallie's Tid": comp_df['Tid1'].round(3),
+            "Old Boys Kører": comp_df['Kører_OB'].fillna("Ingen data") + " (" + comp_df['Stint_Navn_OB'].fillna("") + ")",
+            "Old Boys Tid": comp_df['Tid2'].round(3),
+            "Difference (Sallie's vs OB)": (comp_df['Tid1'] - comp_df['Tid2']).round(3)
+        })
+
+        # Ryd pænt op i parenteserne, hvis data mangler
+        display_comp["Sallie's Kører"] = display_comp["Sallie's Kører"].str.replace(
+            " ()", "", regex=False)
+        display_comp["Old Boys Kører"] = display_comp["Old Boys Kører"].str.replace(
+            " ()", "", regex=False)
+
+        # Style funktionen lægger baggrundsfarver i Differencen
+        def farv_difference(val):
+            if pd.isna(val):
+                return ''
+            color = '#e74c3c' if val > 0 else '#2ecc71'
+            return f'color: {color}; font-weight: bold;'
+
+        st.dataframe(display_comp.style.map(farv_difference, subset=[
+                     "Difference (Sallie's vs OB)"]), hide_index=True)
+    else:
+        st.write(
+            "Kunne ikke finde nok data til begge hold for at lave sammenligningen.")
 
     st.markdown("---")
 
